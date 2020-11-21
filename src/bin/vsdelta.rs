@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{SeekFrom, Result};
 use std::cmp::min;
 use std::io::prelude::*;
+use vsdelta::common::{CHUNKSIZE, CHUNKLEN, COPY, IMMEDIATE};
 
 #[derive(StructOpt)]
 struct Cli {
@@ -25,12 +26,6 @@ fn u64tou8ale(v: u64) -> [u8; 8] {
         (v >> 56) as u8,
     ]
 }
-
-const CHUNKSIZE: usize = 8;
-const CHUNKLEN: u64 = CHUNKSIZE as u64;
-
-const COPY: u8 = 0xCC; // followed by count
-const IMMEDIATE: u8 = 0x11; // followed by count, then by data[count]
 
 #[derive(Debug)]
 enum State {
@@ -66,7 +61,7 @@ fn append_data(dst: &mut File, src: &mut File, num: u64, offset: u64) -> Result<
     Ok(())
 }
 
-fn next_state(state: State, ochunk: &mut Vec<u8>, nchunk: &mut Vec<u8>, new: &mut File, delta: &mut File, offset: u64, chunklen: u64) -> Result<State> {
+fn next_state(state: State, ochunk: &mut Vec<u8>, nchunk: &mut Vec<u8>, new: &mut File, delta: &mut File, chunklen: u64) -> Result<State> {
     Result::Ok(match state {
         State::Init => {
             if nchunk == ochunk {
@@ -126,12 +121,12 @@ fn main() -> Result<()> {
     println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
     println!("0state: {:?}", state);
     // process all of the whole chunks
-    for cnum in 0..num_chunks {
+    for _ in 0..num_chunks {
         old.read(&mut ochunk)?;
         new.read(&mut nchunk)?;
         println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
         println!("1state: {:?}", state);
-        state = next_state(state, &mut ochunk, &mut nchunk, &mut new, &mut delta, cnum * CHUNKLEN, CHUNKLEN)?;
+        state = next_state(state, &mut ochunk, &mut nchunk, &mut new, &mut delta, CHUNKLEN)?;
     }
 
     println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
@@ -143,7 +138,7 @@ fn main() -> Result<()> {
     let mut partial_nchunk = vec![0u8; remainder as usize];
     old.read(&mut partial_ochunk)?;
     new.read(&mut partial_nchunk)?;
-    state = next_state(state, &mut partial_ochunk, &mut partial_nchunk, &mut new, &mut delta, num_chunks * CHUNKLEN, remainder)?;
+    state = next_state(state, &mut partial_ochunk, &mut partial_nchunk, &mut new, &mut delta, remainder)?;
 
     if nlen > min_len {
         // new file is longer - we must copy the excess
@@ -169,7 +164,7 @@ fn main() -> Result<()> {
 
         // update the seek position of new, as we haven't read from it for a comparison
         println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
-        let new_pos = new.seek(SeekFrom::Current(excess as i64))?;
+        new.seek(SeekFrom::Current(excess as i64))?;
         println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
     }
 
