@@ -2,4 +2,4 @@ This is an old file, for use when testing vsdelta.
 
 It contains just a few lines of text, but these should be sufficient to test the operation of vsdelta.
 
-aaaabb_this_has_been_fffgggghhhhiiiijjjjkkkkllllmmmmnnnnooooppp_modified_in_place_uuvvvvwwwwxxxxyyyyzzzz
+aaaabb               fffgggghhhhiiiijjjjkkkkllllmmmmnnnnooooppp                   uuvvvvwwwwxxxxyyyyzzzz
