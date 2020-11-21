@@ -32,6 +32,7 @@ const CHUNKLEN: u64 = CHUNKSIZE as u64;
 const COPY: u8 = 0xCC; // followed by count
 const IMMEDIATE: u8 = 0x11; // followed by count, then by data[count]
 
+#[derive(Debug)]
 enum State {
     Init,
     Matching(u64),
@@ -121,26 +122,60 @@ fn main() -> Result<()> {
     let mut ochunk = vec![0u8; CHUNKSIZE];
     let mut nchunk = vec![0u8; CHUNKSIZE];
     let num_chunks = min_len / CHUNKLEN;
-    let remainder = min_len - num_chunks * CHUNKLEN;
-    println!("remainder: {:?}", remainder);
 
+    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("0state: {:?}", state);
     // process all of the whole chunks
     for cnum in 0..num_chunks {
         old.read(&mut ochunk)?;
         new.read(&mut nchunk)?;
+        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        println!("1state: {:?}", state);
         state = next_state(state, &mut ochunk, &mut nchunk, &mut new, &mut delta, cnum * CHUNKLEN, CHUNKLEN)?;
     }
 
+    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("2state: {:?}", state);
     // process the final, partial chunk.
+    let remainder = min_len - num_chunks * CHUNKLEN;
+    println!("remainder: {:?}", remainder);
     let mut partial_ochunk = vec![0u8; remainder as usize];
     let mut partial_nchunk = vec![0u8; remainder as usize];
     old.read(&mut partial_ochunk)?;
     new.read(&mut partial_nchunk)?;
     state = next_state(state, &mut partial_ochunk, &mut partial_nchunk, &mut new, &mut delta, num_chunks * CHUNKLEN, remainder)?;
 
-    // TODO: deal with the remaining bytes of *either* "old" or "new"
+    if nlen > min_len {
+        // new file is longer - we must copy the excess
+        let excess = nlen - min_len;
+        println!("excess: {:?}", excess);
+
+        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        println!("3state: {:?}", state);
+        state = match state {
+            State::Init => { // the old file was empty
+                delta.write(&[IMMEDIATE])?;
+                State::Different(excess)
+            },
+            State::Matching(num) => { // the new file matched the end of the old file
+                delta.write(&u64tou8ale(num))?;
+                delta.write(&[IMMEDIATE])?;
+                State::Different(excess)
+            },
+            State::Different(num) => { // the new file is already different to the end of the old file 
+                State::Different(num + excess)
+            }
+        };
+
+        // update the seek position of new, as we haven't read from it for a comparison
+        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        let new_pos = new.seek(SeekFrom::Current(excess as i64))?;
+        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    }
 
     // write final count
+    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("4state: {:?}", state);
     match state {
         State::Init => {
             // files were empty
