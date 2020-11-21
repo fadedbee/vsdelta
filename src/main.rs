@@ -26,16 +26,16 @@ fn u64tou8ale(v: u64) -> [u8; 8] {
     ]
 }
 
-const BUFSIZE: usize = 8;
-const BUFLEN: u64 = BUFSIZE as u64;
+const CHUNKSIZE: usize = 8;
+const CHUNKLEN: u64 = CHUNKSIZE as u64;
 
 const COPY: u8 = 0xCC; // followed by count
 const IMMEDIATE: u8 = 0x11; // followed by count, then by data[count]
 
 enum State {
     Init,
-    Matching{num: u64, count_pos: u64},
-    Different{num: u64, count_pos: u64}
+    Matching(u64),
+    Different(u64)
 }
 
 fn main() -> Result<()> {
@@ -51,50 +51,52 @@ fn main() -> Result<()> {
 
     let mut state = State::Init;
 
-    let mut obuf = [0; BUFSIZE];
-    let mut nbuf = [0; BUFSIZE];
-    let num_bufs = min_len / BUFLEN;
-    for _ in 0..num_bufs {
-        old.read(&mut obuf)?;
-        new.read(&mut nbuf)?;
+    let mut ochunk = [0; CHUNKSIZE];
+    let mut nchunk = [0; CHUNKSIZE];
+    let mut copybuf = [0; CHUNKSIZE];
+    let num_chunks = min_len / CHUNKLEN;
+    for cnum in 0..num_chunks {
+        old.read(&mut ochunk)?;
+        new.read(&mut nchunk)?;
         state = match state {
             State::Init => {
-                if nbuf == obuf {
+                if nchunk == ochunk {
                     delta.write(&[COPY])?;
-                    delta.write(&u64tou8ale(0))?;
-                    State::Matching{num: BUFLEN, count_pos: 1}
+                    State::Matching(CHUNKLEN)
                 } else {
                     delta.write(&[IMMEDIATE])?;
-                    delta.write(&u64tou8ale(0))?;
-                    State::Different{num: BUFLEN, count_pos: 1}
+                    State::Different(CHUNKLEN)
                 }
             },
-            State::Matching{num, count_pos} => {
-                if nbuf == obuf {
-                    State::Matching{num: num + BUFLEN, count_pos}
+            State::Matching(num) => {
+                if nchunk == ochunk {
+                    println!("0same: {:02X?} {:02X?}", ochunk, nchunk);
+                    State::Matching(num + CHUNKLEN)
                 } else {
-                    delta.seek(SeekFrom::Start(count_pos))?;
+                    println!("0diff: {:02X?} {:02X?}", ochunk, nchunk);
                     delta.write(&u64tou8ale(num))?;
-                    delta.seek(SeekFrom::End(0))?;
                     delta.write(&[IMMEDIATE])?;
-                    let count_pos = delta.seek(SeekFrom::End(0))?;
-                    delta.write(&u64tou8ale(0))?;
-                    delta.write(&nbuf)?;
-                    State::Different{num: BUFLEN, count_pos}
+                    State::Different(CHUNKLEN)
                 }
             },
-            State::Different{num, count_pos} => {
-                if nbuf == obuf {
-                    delta.seek(SeekFrom::Start(count_pos))?;
+            State::Different(num) => {
+                if nchunk == ochunk {
+                    println!("1same: {:02X?} {:02X?}", ochunk, nchunk);
                     delta.write(&u64tou8ale(num))?;
-                    delta.seek(SeekFrom::End(0))?;
+                    
+                    // copy data
+                    new.seek(SeekFrom::Start(cnum * CHUNKLEN - num))?;
+                    for _ in 0..(num / CHUNKLEN) {
+                        new.read(&mut copybuf)?;
+                        delta.write(&copybuf)?;
+                    }
+                    new.seek(SeekFrom::Start((cnum + 1) * CHUNKLEN))?; // restore "new" seek position
+
                     delta.write(&[COPY])?;
-                    let count_pos = delta.seek(SeekFrom::End(0))?;
-                    delta.write(&u64tou8ale(0))?;
-                    State::Matching{num: BUFLEN, count_pos}
+                    State::Matching(CHUNKLEN)
                 } else {
-                    delta.write(&nbuf)?;
-                    State::Different{num: num + BUFLEN, count_pos}
+                    println!("1diff: {:02X?} {:02X?}", ochunk, nchunk);
+                    State::Different(num + CHUNKLEN)
                 }
             }
         }
@@ -105,17 +107,24 @@ fn main() -> Result<()> {
         State::Init => {
             // files were empty
         },
-        State::Matching{num, count_pos} => {
-            delta.seek(SeekFrom::Start(count_pos))?;
+        State::Matching(num) => {
             delta.write(&u64tou8ale(num))?;
         },
-        State::Different{num, count_pos} => {
-            delta.seek(SeekFrom::Start(count_pos))?;
+        State::Different(num) => {
             delta.write(&u64tou8ale(num))?;
+
+            // copy data
+            new.seek(SeekFrom::Start(num_chunks * CHUNKLEN - num))?;
+            for _ in 0..(num / CHUNKLEN) {
+                new.read(&mut copybuf)?;
+                delta.write(&copybuf)?;
+            }
+            new.seek(SeekFrom::Start((num_chunks + 1) * CHUNKLEN))?; // restore "new" seek position
+
         }
     }
 
-    println!("Hello, world!");
+    println!("Hello, world2!");
 
 	Result::Ok(())
 }
