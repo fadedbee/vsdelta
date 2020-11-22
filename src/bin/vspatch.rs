@@ -1,5 +1,5 @@
 use structopt::StructOpt;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Result};
 use vsdelta::common::{OP_CPY, OP_IMM, OP_END};
 use std::io::prelude::*;
@@ -9,12 +9,6 @@ struct Cli {
     file_a: String,
     delta_input: String,
     file_b: Option<String>,
-}
-
-// little endian
-#[inline]
-fn u8aletoi64(b: [u8; 8]) -> i64 {
-    u8aletou64(b) as i64
 }
 
 // little endian
@@ -42,13 +36,56 @@ fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
 
     let mut copybuf = vec![0u8; OP_CPY_CHUNKSIZE];
     for _ in 0..(num / OP_CPY_CHUNKLEN) {
-        src.read(&mut copybuf)?;
-        dst.write(&copybuf)?;
+        src.read(&mut copybuf).unwrap();
+        dst.write(&copybuf).unwrap();
     }
 
     let mut copybuf = vec![0u8; remainder as usize];
-    src.read(&mut copybuf)?;
-    dst.write(&copybuf)?;
+    src.read(&mut copybuf).unwrap();
+    dst.write(&copybuf).unwrap();
+
+    Ok(())
+}
+
+fn inplace(file_name: String, delta_name: String) -> Result<()> {
+    let mut file = match OpenOptions::new().read(true).write(true).open(&file_name) {
+        Ok(file) => file,
+        Err(err) => {
+            panic!("failed to open {:?}, {:?}", file_name, err);
+        }
+    };
+    let flen = file.metadata().unwrap().len();
+    let mut delta = File::open(delta_name)?;
+    let nlen = delta.metadata().unwrap().len();
+
+    loop {
+        let mut opbuf = [0u8; 1];
+        let mut count_buf = [0u8; 8];
+        delta.read_exact(&mut opbuf)?;
+        let opcode = opbuf[0];
+
+        match opcode {
+            OP_CPY => {
+                delta.read_exact(&mut count_buf)?;
+                let count = u8aletou64(count_buf);
+                println!("OP_CPY {:?}", count);
+                file.seek(SeekFrom::Current(count as i64))?; // skip
+            },
+            OP_IMM => {
+                delta.read_exact(&mut count_buf)?;
+                let count = u8aletou64(count_buf);
+                println!("OP_IMM {:?}", count);
+                copy_data(&mut file, &mut delta, count)?; // copy data from delta
+            },
+            OP_END => {
+                println!("OP_END");
+                break;
+            },
+            _ => {
+                println!("error: bad format");
+            }
+        }
+    }
 
     Ok(())
 }
@@ -98,7 +135,7 @@ fn main() -> Result<()> {
 
     match args.file_b {
         None => {
-            //inplace(args.file, args.delta)?;
+            inplace(args.file_a, args.delta_input)?;
         }
         Some(file_b) => {
             external(args.file_a, args.delta_input, file_b)?;
