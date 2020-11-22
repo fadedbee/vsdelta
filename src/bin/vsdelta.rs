@@ -7,9 +7,9 @@ use vsdelta::common::{CHUNKSIZE, CHUNKLEN, OP_CPY, OP_IMM, OP_END};
 
 #[derive(StructOpt)]
 struct Cli {
-    old_file: String,
-    new_file: String,
-    delta_file: String,
+    file_a: String,
+    file_b: String,
+    delta: String,
 }
 
 // little endian
@@ -61,10 +61,10 @@ fn append_data(dst: &mut File, src: &mut File, num: u64, offset: u64) -> Result<
     Ok(())
 }
 
-fn next_state(state: State, ochunk: &mut Vec<u8>, nchunk: &mut Vec<u8>, new: &mut File, delta: &mut File, chunklen: u64) -> Result<State> {
+fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: &mut File, delta: &mut File, chunklen: u64) -> Result<State> {
     Result::Ok(match state {
         State::Init => {
-            if nchunk == ochunk {
+            if bchunk == achunk {
                 delta.write(&[OP_CPY])?;
                 State::Matching(chunklen)
             } else {
@@ -73,28 +73,28 @@ fn next_state(state: State, ochunk: &mut Vec<u8>, nchunk: &mut Vec<u8>, new: &mu
             }
         },
         State::Matching(num) => {
-            if nchunk == ochunk {
-                println!("0same: {:02X?} {:02X?}", ochunk, nchunk);
+            if bchunk == achunk {
+                println!("0same: {:02X?} {:02X?}", achunk, bchunk);
                 State::Matching(num + chunklen)
             } else {
-                println!("0diff: {:02X?} {:02X?}", ochunk, nchunk);
+                println!("0diff: {:02X?} {:02X?}", achunk, bchunk);
                 delta.write(&u64tou8ale(num))?;
                 delta.write(&[OP_IMM])?;
                 State::Different(chunklen)
             }
         },
         State::Different(num) => {
-            if nchunk == ochunk {
-                println!("1same: {:02X?} {:02X?}", ochunk, nchunk);
+            if bchunk == achunk {
+                println!("1same: {:02X?} {:02X?}", achunk, bchunk);
                 delta.write(&u64tou8ale(num))?;
                 
-                // append data from new to delta
-                append_data(delta, new, num, chunklen)?;
+                // append data from file_b to delta
+                append_data(delta, file_b, num, chunklen)?;
 
                 delta.write(&[OP_CPY])?;
                 State::Matching(chunklen)
             } else {
-                println!("1diff: {:02X?} {:02X?}", ochunk, nchunk);
+                println!("1diff: {:02X?} {:02X?}", achunk, bchunk);
                 State::Different(num + chunklen)
             }
         }
@@ -104,72 +104,72 @@ fn next_state(state: State, ochunk: &mut Vec<u8>, nchunk: &mut Vec<u8>, new: &mu
 fn main() -> Result<()> {
 	let args = Cli::from_args();
 
-    let mut old = File::open(args.old_file)?;
-    let olen = old.metadata().unwrap().len();
-    let mut new = File::open(args.new_file)?;
-    let nlen = new.metadata().unwrap().len();
-    let mut delta = File::create(args.delta_file)?;
+    let mut file_a = File::open(args.file_a)?;
+    let alen = file_a.metadata().unwrap().len();
+    let mut file_b = File::open(args.file_b)?;
+    let blen = file_b.metadata().unwrap().len();
+    let mut delta = File::create(args.delta)?;
 
-    let min_len = min(olen, nlen);
+    let min_len = min(alen, blen);
 
     let mut state = State::Init;
 
-    let mut ochunk = vec![0u8; CHUNKSIZE];
-    let mut nchunk = vec![0u8; CHUNKSIZE];
+    let mut achunk = vec![0u8; CHUNKSIZE];
+    let mut bchunk = vec![0u8; CHUNKSIZE];
     let num_chunks = min_len / CHUNKLEN;
 
-    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     println!("0state: {:?}", state);
     // process all of the whole chunks
     for _ in 0..num_chunks {
-        old.read(&mut ochunk)?;
-        new.read(&mut nchunk)?;
-        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        file_a.read(&mut achunk)?;
+        file_b.read(&mut bchunk)?;
+        println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
         println!("1state: {:?}", state);
-        state = next_state(state, &mut ochunk, &mut nchunk, &mut new, &mut delta, CHUNKLEN)?;
+        state = next_state(state, &mut achunk, &mut bchunk, &mut file_b, &mut delta, CHUNKLEN)?;
     }
 
-    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     println!("2state: {:?}", state);
     // process the final, partial chunk.
     let remainder = min_len - num_chunks * CHUNKLEN;
     println!("remainder: {:?}", remainder);
-    let mut partial_ochunk = vec![0u8; remainder as usize];
-    let mut partial_nchunk = vec![0u8; remainder as usize];
-    old.read(&mut partial_ochunk)?;
-    new.read(&mut partial_nchunk)?;
-    state = next_state(state, &mut partial_ochunk, &mut partial_nchunk, &mut new, &mut delta, remainder)?;
+    let mut partial_achunk = vec![0u8; remainder as usize];
+    let mut partial_bchunk = vec![0u8; remainder as usize];
+    file_a.read(&mut partial_achunk)?;
+    file_b.read(&mut partial_bchunk)?;
+    state = next_state(state, &mut partial_achunk, &mut partial_bchunk, &mut file_b, &mut delta, remainder)?;
 
-    if nlen > min_len {
-        // new file is longer - we must copy the excess
-        let excess = nlen - min_len;
+    if blen > min_len {
+        // file_b file is longer - we must copy the excess
+        let excess = blen - min_len;
         println!("excess: {:?}", excess);
 
-        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
         println!("3state: {:?}", state);
         state = match state {
-            State::Init => { // the old file was empty
+            State::Init => { // the file_a file was empty
                 delta.write(&[OP_IMM])?;
                 State::Different(excess)
             },
-            State::Matching(num) => { // the new file matched the end of the old file
+            State::Matching(num) => { // the file_b file matched the end of the file_a file
                 delta.write(&u64tou8ale(num))?;
                 delta.write(&[OP_IMM])?;
                 State::Different(excess)
             },
-            State::Different(num) => { // the new file is already different to the end of the old file 
+            State::Different(num) => { // the file_b file is already different to the end of the file_a file 
                 State::Different(num + excess)
             }
         };
 
-        // update the seek position of new, as we haven't read from it for a comparison
-        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
-        new.seek(SeekFrom::Current(excess as i64))?;
-        println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+        // update the seek position of file_b, as we haven't read from it for a comparison
+        println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
+        file_b.seek(SeekFrom::Current(excess as i64))?;
+        println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     }
 
     // write final count
-    println!("old: {:?}, new: {:?}", old.seek(SeekFrom::Current(0))?, new.seek(SeekFrom::Current(0))?);
+    println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     println!("4state: {:?}", state);
     match state {
         State::Init => {
@@ -181,8 +181,8 @@ fn main() -> Result<()> {
         State::Different(num) => {
             delta.write(&u64tou8ale(num))?;
 
-            // append data from new to delta
-            append_data(&mut delta, &mut new, num, 0)?;
+            // append data from file_b to delta
+            append_data(&mut delta, &mut file_b, num, 0)?;
         }
     }
 
