@@ -1,7 +1,7 @@
 use structopt::StructOpt;
 use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Result};
-use vsdelta::common::{OP_CPY, OP_IMM, OP_END};
+use vsdelta::common::{OP_SKIP, OP_ADD, OP_END};
 use std::io::prelude::*;
 
 #[derive(StructOpt)]
@@ -28,14 +28,14 @@ fn u8aletou64(b: [u8; 8]) -> u64 {
  * Copies "num" bytes from src to dst.
  */
 fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
-    const OP_CPY_CHUNKSIZE: usize = 8;
-    const OP_CPY_CHUNKLEN: u64 = OP_CPY_CHUNKSIZE as u64;
+    const OP_SKIP_CHUNKSIZE: usize = 8;
+    const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
 
-    let num_chunks = num / OP_CPY_CHUNKLEN;
-    let remainder = num - num_chunks * OP_CPY_CHUNKLEN;
+    let num_chunks = num / OP_SKIP_CHUNKLEN;
+    let remainder = num - num_chunks * OP_SKIP_CHUNKLEN;
 
-    let mut copybuf = vec![0u8; OP_CPY_CHUNKSIZE];
-    for _ in 0..(num / OP_CPY_CHUNKLEN) {
+    let mut copybuf = vec![0u8; OP_SKIP_CHUNKSIZE];
+    for _ in 0..(num / OP_SKIP_CHUNKLEN) {
         src.read(&mut copybuf).unwrap();
         dst.write(&copybuf).unwrap();
     }
@@ -65,16 +65,16 @@ fn inplace(file_name: String, delta_name: String) -> Result<()> {
         let opcode = opbuf[0];
 
         match opcode {
-            OP_CPY => {
+            OP_SKIP => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_CPY {:?}", count);
+                println!("OP_SKIP {:?}", count);
                 file.seek(SeekFrom::Current(count as i64))?; // skip
             },
-            OP_IMM => {
+            OP_ADD => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_IMM {:?}", count);
+                println!("OP_ADD {:?}", count);
                 copy_data(&mut file, &mut delta, count)?; // copy data from delta
             },
             OP_END => {
@@ -104,16 +104,16 @@ fn external(src_name: String, delta_name: String, dst_name: String) -> Result<()
         let opcode = opbuf[0];
 
         match opcode {
-            OP_CPY => {
+            OP_SKIP => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_CPY {:?}", count);
+                println!("OP_SKIP {:?}", count);
                 copy_data(&mut dst, &mut src, count)?; // copy data from src
             },
-            OP_IMM => {
+            OP_ADD => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_IMM {:?}", count);
+                println!("OP_ADD {:?}", count);
                 src.seek(SeekFrom::Current(count as i64))?; // skip data in src
                 copy_data(&mut dst, &mut delta, count)?; // copy data from delta
             },

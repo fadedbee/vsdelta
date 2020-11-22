@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{SeekFrom, Result};
 use std::cmp::min;
 use std::io::prelude::*;
-use vsdelta::common::{CHUNKSIZE, CHUNKLEN, OP_CPY, OP_IMM, OP_END};
+use vsdelta::common::{CHUNKSIZE, CHUNKLEN, OP_SKIP, OP_ADD, OP_END};
 
 #[derive(StructOpt)]
 struct Cli {
@@ -38,16 +38,16 @@ enum State {
  * Appends "num" bytes at "offset" in src to dst.
  */
 fn append_data(dst: &mut File, src: &mut File, num: u64, offset: u64) -> Result<()> {
-    const OP_CPY_CHUNKSIZE: usize = 8;
-    const OP_CPY_CHUNKLEN: u64 = OP_CPY_CHUNKSIZE as u64;
+    const OP_SKIP_CHUNKSIZE: usize = 8;
+    const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
 
-    let num_chunks = num / OP_CPY_CHUNKLEN;
-    let remainder = num - num_chunks * OP_CPY_CHUNKLEN;
+    let num_chunks = num / OP_SKIP_CHUNKLEN;
+    let remainder = num - num_chunks * OP_SKIP_CHUNKLEN;
 
     src.seek(SeekFrom::Current(-((num + offset) as i64)))?;
 
-    let mut copybuf = vec![0u8; OP_CPY_CHUNKSIZE];
-    for _ in 0..(num / OP_CPY_CHUNKLEN) {
+    let mut copybuf = vec![0u8; OP_SKIP_CHUNKSIZE];
+    for _ in 0..(num / OP_SKIP_CHUNKLEN) {
         src.read(&mut copybuf)?;
         dst.write(&copybuf)?;
     }
@@ -65,10 +65,10 @@ fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: 
     Result::Ok(match state {
         State::Init => {
             if bchunk == achunk {
-                delta.write(&[OP_CPY])?;
+                delta.write(&[OP_SKIP])?;
                 State::Matching(chunklen)
             } else {
-                delta.write(&[OP_IMM])?;
+                delta.write(&[OP_ADD])?;
                 State::Different(chunklen)
             }
         },
@@ -79,7 +79,7 @@ fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: 
             } else {
                 println!("0diff: {:02X?} {:02X?}", achunk, bchunk);
                 delta.write(&u64tou8ale(num))?;
-                delta.write(&[OP_IMM])?;
+                delta.write(&[OP_ADD])?;
                 State::Different(chunklen)
             }
         },
@@ -91,7 +91,7 @@ fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: 
                 // append data from file_b to delta
                 append_data(delta, file_b, num, chunklen)?;
 
-                delta.write(&[OP_CPY])?;
+                delta.write(&[OP_SKIP])?;
                 State::Matching(chunklen)
             } else {
                 println!("1diff: {:02X?} {:02X?}", achunk, bchunk);
@@ -149,12 +149,12 @@ fn main() -> Result<()> {
         println!("3state: {:?}", state);
         state = match state {
             State::Init => { // the file_a file was empty
-                delta.write(&[OP_IMM])?;
+                delta.write(&[OP_ADD])?;
                 State::Different(excess)
             },
             State::Matching(num) => { // the file_b file matched the end of the file_a file
                 delta.write(&u64tou8ale(num))?;
-                delta.write(&[OP_IMM])?;
+                delta.write(&[OP_ADD])?;
                 State::Different(excess)
             },
             State::Different(num) => { // the file_b file is already different to the end of the file_a file 
