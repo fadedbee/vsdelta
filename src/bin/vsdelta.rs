@@ -9,7 +9,7 @@ use vsdelta::common::{CHUNKSIZE, CHUNKLEN, OP_CPY, OP_IMM, OP_END};
 struct Cli {
     file_a: String,
     file_b: String,
-    delta: String,
+    delta_output: String,
 }
 
 // little endian
@@ -108,7 +108,7 @@ fn main() -> Result<()> {
     let alen = file_a.metadata().unwrap().len();
     let mut file_b = File::open(args.file_b)?;
     let blen = file_b.metadata().unwrap().len();
-    let mut delta = File::create(args.delta)?;
+    let mut delta = File::create(args.delta_output)?;
 
     let min_len = min(alen, blen);
 

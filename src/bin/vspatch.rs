@@ -7,7 +7,7 @@ use std::io::prelude::*;
 #[derive(StructOpt)]
 struct Cli {
     file_a: String,
-    delta: String,
+    delta_input: String,
     file_b: Option<String>,
 }
 
@@ -101,7 +101,7 @@ fn main() -> Result<()> {
             //inplace(args.file, args.delta)?;
         }
         Some(file_b) => {
-            external(args.file_a, args.delta, file_b)?;
+            external(args.file_a, args.delta_input, file_b)?;
         }
     }
 
