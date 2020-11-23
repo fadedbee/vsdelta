@@ -18,27 +18,25 @@ The vsdelta format are instructions for a very limited virtual machine (vsapply)
 
 If this is not an understood version, vsapply should exit with an error.
 
-#### OP_HASH_A
-- 1 byte of OP_HASH_A (0x4A)
-- 1 byte of HASH_SHA256 (0x45)
+#### OP_SHA256_A
+- 1 byte of OP_SHA256_A (0xAA)
 - 32 bytes of expected sha256
 
 If this hash does not match the hash of file_a, vsapply should exit with an error.
 
-#### OP_HASH_B
-- 1 byte of OP_HASH_A (0x4B)
-- 1 byte of HASH_SHA256 (0x45)
+#### OP_SHA256_B
+- 1 byte of OP_SHA256_A (0xBB)
 - 32 bytes of expected sha256
 
 If this hash does not match the hash of file_b, vsapply should exit with an error.
 Note: This opcode only make sense if there are no further OP_SKIP, OP_ADD or OP_HOLEs.
 
 #### OP_LEN_A
-- 1 bytes of OP_LEN_A (0x7A)
+- 1 bytes of OP_LEN_A (0x77)
 - 8 bytes of expected file_a length
 
 #### OP_LEN_B
-- 1 bytes of OP_LEN_A (0x7B)
+- 1 bytes of OP_LEN_A (0x88)
 - 8 bytes of expected file_a length
 
 #### OP_SKIP file_b is same as file_a
@@ -48,8 +46,8 @@ Note: This opcode only make sense if there are no further OP_SKIP, OP_ADD or OP_
 in-place: The file_a pointer should be advanced by "count" bytes.
 external: "count" bytes should be copied from file_a to file_b (the output).
 
-#### OP_ADD file_b is different from file_a
-- 1 byte of OP_ADD (0xAA)
+#### OP_DIFF file_b is different from file_a
+- 1 byte of OP_DIFF (0xDD)
 - 8 bytes of count
 - count bytes of data
 

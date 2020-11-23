@@ -3,13 +3,18 @@ use std::fs::File;
 use std::io::{SeekFrom, Result};
 use std::cmp::min;
 use std::io::prelude::*;
-use vsdelta::common::{CHUNKSIZE, CHUNKLEN, OP_SKIP, OP_ADD, OP_END};
+use vsdelta::common::*;
 
 #[derive(StructOpt)]
 struct Cli {
     file_a: String,
     file_b: String,
     delta_output: String,
+}
+
+pub mod built_info {
+    // The file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
 // little endian
@@ -34,20 +39,68 @@ enum State {
     Different(u64)
 }
 
+fn write_magic(delta: &mut File) -> Result<()> {
+    delta.write("vsdelta".as_bytes())?;
+    Ok(())
+}
+
+fn write_op_ver(delta: &mut File, version: [u8; 3]) -> Result<()> {
+    delta.write(&[OP_VER])?;
+    delta.write(&version)?;
+    Ok(())
+}
+
+fn write_op_len_a(delta: &mut File, alen: u64) -> Result<()> {
+    delta.write(&[OP_LEN_A])?;
+    delta.write(&u64tou8ale(alen))?;
+    Ok(())
+}
+
+fn write_op_sha256_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
+    file_a.seek(SeekFrom::Start(0))?; // rewind
+    let hash_a = sha256(file_a, alen)?;
+    file_a.seek(SeekFrom::Start(0))?; // rewind
+    
+    delta.write(&[OP_SHA256_A])?;
+    delta.write(&hash_a)?;
+
+    Ok(())
+}
+
+fn write_op_sha256_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
+    file_b.seek(SeekFrom::Start(0))?; // rewind
+    let hash_a = sha256(file_b, blen)?;
+    file_b.seek(SeekFrom::Start(0))?; // rewind
+    
+    delta.write(&[OP_SHA256_B])?;
+    delta.write(&hash_a)?;
+
+    Ok(())
+}
+
+fn write_op_len_b(delta: &mut File, blen: u64) -> Result<()> {
+    delta.write(&[OP_LEN_B])?;
+    delta.write(&u64tou8ale(blen))?;
+    Ok(())
+}
+
+fn write_op_end(delta: &mut File) -> Result<()> {
+    delta.write(&[OP_END])?;
+    Ok(())
+}
+
 /* 
  * Appends "num" bytes at "offset" in src to dst.
  */
 fn append_data(dst: &mut File, src: &mut File, num: u64, offset: u64) -> Result<()> {
-    const OP_SKIP_CHUNKSIZE: usize = 8;
-    const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
 
-    let num_chunks = num / OP_SKIP_CHUNKLEN;
-    let remainder = num - num_chunks * OP_SKIP_CHUNKLEN;
+    let num_chunks = num / BIGCHUNKLEN;
+    let remainder = num - num_chunks * BIGCHUNKLEN;
 
     src.seek(SeekFrom::Current(-((num + offset) as i64)))?;
 
-    let mut copybuf = vec![0u8; OP_SKIP_CHUNKSIZE];
-    for _ in 0..(num / OP_SKIP_CHUNKLEN) {
+    let mut copybuf = vec![0u8; BIGCHUNKSIZE];
+    for _ in 0..(num / BIGCHUNKLEN) {
         src.read(&mut copybuf)?;
         dst.write(&copybuf)?;
     }
@@ -68,7 +121,7 @@ fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: 
                 delta.write(&[OP_SKIP])?;
                 State::Matching(chunklen)
             } else {
-                delta.write(&[OP_ADD])?;
+                delta.write(&[OP_DIFF])?;
                 State::Different(chunklen)
             }
         },
@@ -79,7 +132,7 @@ fn next_state(state: State, achunk: &mut Vec<u8>, bchunk: &mut Vec<u8>, file_b: 
             } else {
                 println!("0diff: {:02X?} {:02X?}", achunk, bchunk);
                 delta.write(&u64tou8ale(num))?;
-                delta.write(&[OP_ADD])?;
+                delta.write(&[OP_DIFF])?;
                 State::Different(chunklen)
             }
         },
@@ -118,6 +171,14 @@ fn main() -> Result<()> {
     let mut bchunk = vec![0u8; CHUNKSIZE];
     let num_chunks = min_len / CHUNKLEN;
 
+    write_magic(&mut delta)?;
+    write_op_ver(&mut delta, [
+        built_info::PKG_VERSION_MAJOR.parse::<u8>().unwrap(), 
+        built_info::PKG_VERSION_MINOR.parse::<u8>().unwrap(), 
+        built_info::PKG_VERSION_PATCH.parse::<u8>().unwrap()])?;
+    write_op_len_a(&mut delta, alen)?;
+    write_op_sha256_a(&mut delta, &mut file_a, alen)?;
+
     println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     println!("0state: {:?}", state);
     // process all of the whole chunks
@@ -149,12 +210,12 @@ fn main() -> Result<()> {
         println!("3state: {:?}", state);
         state = match state {
             State::Init => { // the file_a file was empty
-                delta.write(&[OP_ADD])?;
+                delta.write(&[OP_DIFF])?;
                 State::Different(excess)
             },
             State::Matching(num) => { // the file_b file matched the end of the file_a file
                 delta.write(&u64tou8ale(num))?;
-                delta.write(&[OP_ADD])?;
+                delta.write(&[OP_DIFF])?;
                 State::Different(excess)
             },
             State::Different(num) => { // the file_b file is already different to the end of the file_a file 
@@ -187,7 +248,9 @@ fn main() -> Result<()> {
     }
 
     // write end
-    delta.write(&[OP_END])?;
+    write_op_len_b(&mut delta, blen)?; // FIXME: calculate sha256(b) as we read file_b, to save I/O
+    write_op_sha256_b(&mut delta, &mut file_b, blen)?; // FIXME: calculate sha256(b) as we read file_b, to save I/O
+    write_op_end(&mut delta)?;
 
 	Result::Ok(())
 }
