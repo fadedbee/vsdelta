@@ -68,6 +68,7 @@ fn op_ver(delta: &mut File) -> Result<()> {
     if ver[0] != 0 {
         panic!("Incompatible version.");
     }
+    println!("OP_VER {:?}.{:?}.{:?}", ver[0], ver[1], ver[2]);
     Ok(())
 }
 
@@ -75,8 +76,9 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
     let mut lenbuf = [0u8; 8];
     delta.read_exact(&mut lenbuf)?;
     let len = u8aletou64(lenbuf);
+    println!("OP_LEN_A {:?}", len);
     if len != alen {
-        panic!("This delta expects file_a to be {:?} bytes long, not {:?} bytes.", alen, len);
+        panic!("This delta expects file_a to be {:?} bytes long, not {:?} bytes.", len, alen);
     }
     Ok(())
 }
@@ -84,13 +86,26 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
 fn op_sha256_a(delta: &mut File) -> Result<()> {
     let mut shabuf = [0u8; 32];
     delta.read_exact(&mut shabuf)?;
+    println!("OP_SHA256_A {:02X?}", shabuf);
     // FIXME: check sha256
+    Ok(())
+}
+
+fn op_len_b(delta: &mut File, blen: u64)-> Result<()>  {
+    let mut lenbuf = [0u8; 8];
+    delta.read_exact(&mut lenbuf)?;
+    let len = u8aletou64(lenbuf);
+    println!("OP_LEN_B {:?}", len);
+    if len != blen {
+        panic!("This delta expects file_b to be {:?} bytes long, not {:?} bytes.", len, blen);
+    }
     Ok(())
 }
 
 fn op_sha256_b(delta: &mut File) -> Result<()> {
     let mut shabuf = [0u8; 32];
     delta.read_exact(&mut shabuf)?;
+    println!("OP_SHA256_B {:02X?}", shabuf);
     // FIXME: check sha256
     Ok(())
 }
@@ -151,10 +166,22 @@ fn main() -> Result<()> {
                     }
                 }
             }
+            OP_LEN_B => {
+                let blen = match opt_file_b {
+                    Some(ref mut file_b) => {
+                        file_b.metadata().unwrap().len()
+                    },
+                    None => {
+                        alen
+                    }
+                };
+                op_len_b(&mut delta, blen)?;
+            }
             OP_SHA256_B => {
                 op_sha256_b(&mut delta)?;
             }
             OP_END => {
+                println!("OP_END");
                 break;
             }
             _ => {
