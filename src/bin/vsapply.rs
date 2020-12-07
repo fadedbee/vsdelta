@@ -83,11 +83,14 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
     Ok(())
 }
 
-fn op_sha256_a(delta: &mut File) -> Result<()> {
+fn op_sha256_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
     let mut shabuf = [0u8; 32];
     delta.read_exact(&mut shabuf)?;
     println!("OP_SHA256_A {:02X?}", shabuf);
-    // FIXME: check sha256
+    let hash = sha256(file_a, alen)?;
+    if hash != shabuf {
+        panic!("This delta expects file_a's hash to be {:X?}, not {:X?}.", hash, shabuf);
+    };
     Ok(())
 }
 
@@ -102,11 +105,14 @@ fn op_len_b(delta: &mut File, blen: u64)-> Result<()>  {
     Ok(())
 }
 
-fn op_sha256_b(delta: &mut File) -> Result<()> {
+fn op_sha256_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
     let mut shabuf = [0u8; 32];
     delta.read_exact(&mut shabuf)?;
     println!("OP_SHA256_B {:02X?}", shabuf);
-    // FIXME: check sha256
+    let hash = sha256(file_b, blen)?;
+    if hash != shabuf {
+        panic!("This delta expects file_b's hash to be {:X?}, not {:X?}.", hash, shabuf);
+    };
     Ok(())
 }
 
@@ -137,7 +143,7 @@ fn main() -> Result<()> {
                 op_len_a(&mut delta, alen)?;
             }
             OP_SHA256_A => {
-                op_sha256_a(&mut delta)?;
+                op_sha256_a(&mut delta, &mut file_a, alen)?;
             }
             OP_SKIP => {
                 delta.read_exact(&mut count_buf)?;
@@ -178,7 +184,15 @@ fn main() -> Result<()> {
                 op_len_b(&mut delta, blen)?;
             }
             OP_SHA256_B => {
-                op_sha256_b(&mut delta)?;
+                match opt_file_b {
+                    Some(ref mut file_b) => {
+                        let blen = file_b.metadata().unwrap().len();
+                        op_sha256_b(&mut delta, file_b, blen)?;
+                    },
+                    None => {
+                        op_sha256_b(&mut delta, &mut file_a, alen)?;
+                    }
+                }
             }
             OP_END => {
                 println!("OP_END");
