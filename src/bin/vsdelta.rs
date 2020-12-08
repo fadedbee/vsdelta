@@ -56,23 +56,23 @@ fn write_op_len_a(delta: &mut File, alen: u64) -> Result<()> {
     Ok(())
 }
 
-fn write_op_sha256_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
+fn write_op_hash_file_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
     file_a.seek(SeekFrom::Start(0))?; // rewind
-    let hash_a = sha256(file_a, alen)?;
+    let hash_a = hash_file(file_a, alen)?;
     file_a.seek(SeekFrom::Start(0))?; // rewind
     
-    delta.write(&[OP_SHA256_A])?;
+    delta.write(&[OP_HASH_A])?;
     delta.write(&hash_a)?;
 
     Ok(())
 }
 
-fn write_op_sha256_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
+fn write_op_hash_file_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
     file_b.seek(SeekFrom::Start(0))?; // rewind
-    let hash_a = sha256(file_b, blen)?;
+    let hash_a = hash_file(file_b, blen)?;
     file_b.seek(SeekFrom::Start(0))?; // rewind
     
-    delta.write(&[OP_SHA256_B])?;
+    delta.write(&[OP_HASH_B])?;
     delta.write(&hash_a)?;
 
     Ok(())
@@ -177,7 +177,7 @@ fn main() -> Result<()> {
         built_info::PKG_VERSION_MINOR.parse::<u8>().unwrap(), 
         built_info::PKG_VERSION_PATCH.parse::<u8>().unwrap()])?;
     write_op_len_a(&mut delta, alen)?;
-    write_op_sha256_a(&mut delta, &mut file_a, alen)?;
+    write_op_hash_file_a(&mut delta, &mut file_a, alen)?;
 
     println!("file_a: {:?}, file_b: {:?}", file_a.seek(SeekFrom::Current(0))?, file_b.seek(SeekFrom::Current(0))?);
     println!("0state: {:?}", state);
@@ -248,8 +248,8 @@ fn main() -> Result<()> {
     }
 
     // write end
-    write_op_len_b(&mut delta, blen)?; // FIXME: calculate sha256(b) as we read file_b, to save I/O
-    write_op_sha256_b(&mut delta, &mut file_b, blen)?; // FIXME: calculate sha256(b) as we read file_b, to save I/O
+    write_op_len_b(&mut delta, blen)?; // FIXME: calculate hash_file(b) as we read file_b, to save I/O
+    write_op_hash_file_b(&mut delta, &mut file_b, blen)?; // FIXME: calculate hash_file(b) as we read file_b, to save I/O
     write_op_end(&mut delta)?;
 
 	Result::Ok(())

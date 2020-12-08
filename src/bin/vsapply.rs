@@ -1,5 +1,5 @@
 use structopt::StructOpt;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Result};
 use vsdelta::common::*;
 use std::io::prelude::*;
@@ -28,20 +28,24 @@ fn u8aletou64(b: [u8; 8]) -> u64 {
  * Copies "num" bytes from src to dst.
  */
 fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
-    const OP_SKIP_CHUNKSIZE: usize = 8;
+    const OP_SKIP_CHUNKSIZE: usize = 59;
     const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
 
     let num_chunks = num / OP_SKIP_CHUNKLEN;
     let remainder = num - num_chunks * OP_SKIP_CHUNKLEN;
 
-    let mut copybuf = vec![0u8; OP_SKIP_CHUNKSIZE];
+    let mut copybuf = vec![0xFFu8; OP_SKIP_CHUNKSIZE];
     for _ in 0..(num / OP_SKIP_CHUNKLEN) {
-        src.read(&mut copybuf).unwrap();
+        let pos = src.seek(SeekFrom::Current(0)).unwrap();
+        println!("pos: {:?}", pos);
+        src.read_exact(&mut copybuf).unwrap();
+        println!("copybuf {:X?}", copybuf);
         dst.write(&copybuf).unwrap();
     }
 
     let mut copybuf = vec![0u8; remainder as usize];
-    src.read(&mut copybuf).unwrap();
+    src.read_exact(&mut copybuf).unwrap();
+    println!("copybuf {:X?}", copybuf);
     dst.write(&copybuf).unwrap();
 
     Ok(())
@@ -83,13 +87,13 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
     Ok(())
 }
 
-fn op_sha256_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
-    let mut shabuf = [0u8; 32];
-    delta.read_exact(&mut shabuf)?;
-    println!("OP_SHA256_A {:02X?}", shabuf);
-    let hash = sha256(file_a, alen)?;
-    if hash != shabuf {
-        panic!("This delta expects file_a's hash to be {:X?}, not {:X?}.", hash, shabuf);
+fn op_hash_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
+    let mut hashbuf = [0u8; 32];
+    delta.read_exact(&mut hashbuf)?;
+    println!("OP_HASH_A {:02X?}", hashbuf);
+    let hash = hash_file(file_a, alen)?;
+    if hash != hashbuf {
+        panic!("This delta expects file_a's hash to be {:X?}, not {:X?}.", hashbuf, hash);
     };
     Ok(())
 }
@@ -105,14 +109,16 @@ fn op_len_b(delta: &mut File, blen: u64)-> Result<()>  {
     Ok(())
 }
 
-fn op_sha256_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
-    let mut shabuf = [0u8; 32];
-    delta.read_exact(&mut shabuf)?;
-    println!("OP_SHA256_B {:02X?}", shabuf);
-    let hash = sha256(file_b, blen)?;
-    if hash != shabuf {
-        panic!("This delta expects file_b's hash to be {:X?}, not {:X?}.", hash, shabuf);
+fn op_hash_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
+    let mut hashbuf = [0u8; 32];
+    delta.read_exact(&mut hashbuf)?;
+    println!("OP_HASH_B {:02X?}", hashbuf);
+    /*
+    let hash = hash_file(file_b, blen)?;
+    if hash != hashbuf {
+        panic!("This delta expects file_b's hash to be {:X?}, not {:X?}.", hashbuf, hash);
     };
+    */
     Ok(())
 }
 
@@ -123,7 +129,12 @@ fn main() -> Result<()> {
     let alen = file_a.metadata().unwrap().len();
     let mut delta = File::open(args.delta_input)?;
     let mut opt_file_b = match args.file_b {
-        Some(file_b) => Some(File::create(file_b)?),
+        Some(file_b) => Some(
+            OpenOptions::new().write(true)
+                             .read(true)
+                             .create_new(true)
+                             .open(file_b).unwrap()
+        ),
         None => None
     };
 
@@ -142,8 +153,8 @@ fn main() -> Result<()> {
             OP_LEN_A => {
                 op_len_a(&mut delta, alen)?;
             }
-            OP_SHA256_A => {
-                op_sha256_a(&mut delta, &mut file_a, alen)?;
+            OP_HASH_A => {
+                op_hash_a(&mut delta, &mut file_a, alen)?;
             }
             OP_SKIP => {
                 delta.read_exact(&mut count_buf)?;
@@ -151,6 +162,7 @@ fn main() -> Result<()> {
                 println!("OP_SKIP {:?}", count);
                 match opt_file_b {
                     Some(ref mut file_b) => {
+                        println!("OP_SKIP copy_data {:?}", count);
                         copy_data(file_b, &mut file_a, count)?; // copy data from file_a
                     },
                     None => {
@@ -183,14 +195,15 @@ fn main() -> Result<()> {
                 };
                 op_len_b(&mut delta, blen)?;
             }
-            OP_SHA256_B => {
+            OP_HASH_B => {
                 match opt_file_b {
                     Some(ref mut file_b) => {
                         let blen = file_b.metadata().unwrap().len();
-                        op_sha256_b(&mut delta, file_b, blen)?;
+                        println!("blen: {:?}", blen);
+                        op_hash_b(&mut delta, file_b, blen)?;
                     },
                     None => {
-                        op_sha256_b(&mut delta, &mut file_a, alen)?;
+                        op_hash_b(&mut delta, &mut file_a, alen)?;
                     }
                 }
             }

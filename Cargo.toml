@@ -9,7 +9,9 @@ build = "build.rs"
 
 [dependencies]
 structopt = "0.3"
-sha2 = "0.9"
+#sha2 = "0.9"
+blake3 = "0.3"
+
 
 [build-dependencies]
 built = "0.4"
