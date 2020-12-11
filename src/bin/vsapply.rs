@@ -122,12 +122,22 @@ fn op_hash_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
     Ok(())
 }
 
+//https://github.com/fadedbee/vsdelta/issues/7
+//$ reset ; cp  ../virtsync/test-dir/target.txt ./ && ls -lA target.txt && b3sum target.txt && cargo run --bin vsapply target.txt ../virtsync/test-dir/target.txt.2020-12-0* && ls target.txt && b3sum target.txt
+//thread 'main' panicked at 'This delta expects file_b to be 43999 bytes long, not 43964 bytes.', src/bin/vsapply.rs:107:9
+
 fn main() -> Result<()> {
     let args = Cli::from_args();
-    
-    let mut file_a = File::open(args.file_a)?;
+
+    // this only needs to be writeble if it is being updated in-place
+    let mut file_a = OpenOptions::new().write(args.file_b.is_none())
+                                       .read(true)
+                                       .open(args.file_a).unwrap();
     let alen = file_a.metadata().unwrap().len();
+
     let mut delta = File::open(args.delta_input)?;
+
+    // this needs to be read/write, as its hash is checked after it is written
     let mut opt_file_b = match args.file_b {
         Some(file_b) => Some(
             OpenOptions::new().write(true)
@@ -187,10 +197,12 @@ fn main() -> Result<()> {
             OP_LEN_B => {
                 let blen = match opt_file_b {
                     Some(ref mut file_b) => {
+                        file_b.sync_all()?; // otherwise the we'll need to read the length using seek
                         file_b.metadata().unwrap().len()
                     },
                     None => {
-                        alen
+                        file_a.sync_all()?; // otherwise the we'll need to read the length using seek
+                        file_a.metadata().unwrap().len()
                     }
                 };
                 op_len_b(&mut delta, blen)?;
@@ -198,11 +210,15 @@ fn main() -> Result<()> {
             OP_HASH_B => {
                 match opt_file_b {
                     Some(ref mut file_b) => {
+                        file_b.sync_all()?; // otherwise the we'll need to read the length using seek
                         let blen = file_b.metadata().unwrap().len();
                         println!("blen: {:?}", blen);
                         op_hash_b(&mut delta, file_b, blen)?;
                     },
                     None => {
+                        file_a.sync_all()?; // otherwise the we'll need to read the length using seek
+                        let alen = file_a.metadata().unwrap().len();
+                        println!("blen: {:?}", alen);
                         op_hash_b(&mut delta, &mut file_a, alen)?;
                     }
                 }
