@@ -3,6 +3,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{SeekFrom, Result};
 use vsdelta::common::*;
 use std::io::prelude::*;
+use std::panic;
+use std::process;
 
 #[derive(StructOpt)]
 struct Cli {
@@ -98,12 +100,20 @@ fn op_hash_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
     Ok(())
 }
 
-fn op_len_b(delta: &mut File, blen: u64)-> Result<()>  {
+fn op_len_b(delta: &mut File, file: &mut File)-> Result<()>  {
+    file.sync_all()?; // otherwise the we'll need to read the length using seek
+    let mut blen = file.metadata().unwrap().len();
+
     let mut lenbuf = [0u8; 8];
     delta.read_exact(&mut lenbuf)?;
     let len = u8aletou64(lenbuf);
     println!("OP_LEN_B {:?}", len);
-    if len != blen {
+    if len < blen { // if the file should shrink, we must truncate it
+        file.set_len(len).unwrap();
+        file.sync_all()?; // otherwise the we'll need to read the length using seek
+        blen = file.metadata().unwrap().len();
+    };
+    if len != blen { // if the file should have grown, it should have already grown due to OP_DIFFs
         panic!("This delta expects file_b to be {:?} bytes long, not {:?} bytes.", len, blen);
     }
     Ok(())
@@ -122,12 +132,18 @@ fn op_hash_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
     Ok(())
 }
 
-//https://github.com/fadedbee/vsdelta/issues/7
-//$ reset ; cp  ../virtsync/test-dir/target.txt ./ && ls -lA target.txt && b3sum target.txt && cargo run --bin vsapply target.txt ../virtsync/test-dir/target.txt.2020-12-0* && ls target.txt && b3sum target.txt
-//thread 'main' panicked at 'This delta expects file_b to be 43999 bytes long, not 43964 bytes.', src/bin/vsapply.rs:107:9
-
 fn main() -> Result<()> {
     let args = Cli::from_args();
+
+    #[cfg(not(debug_assertions))]
+    panic::set_hook(Box::new(|panic_info| {
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            eprintln!("panic occurred: {:?}", s);
+        } else {
+            eprintln!("panic occurred");
+        }
+        process::exit(1);
+    }));
 
     // this only needs to be writeble if it is being updated in-place
     let mut file_a = OpenOptions::new().write(args.file_b.is_none())
@@ -143,7 +159,7 @@ fn main() -> Result<()> {
             OpenOptions::new().write(true)
                              .read(true)
                              .create_new(true)
-                             .open(file_b).unwrap()
+                             .open(&file_b).expect(&format!("cannot open {:?}", &file_b))
         ),
         None => None
     };
@@ -195,17 +211,11 @@ fn main() -> Result<()> {
                 }
             }
             OP_LEN_B => {
-                let blen = match opt_file_b {
-                    Some(ref mut file_b) => {
-                        file_b.sync_all()?; // otherwise the we'll need to read the length using seek
-                        file_b.metadata().unwrap().len()
-                    },
-                    None => {
-                        file_a.sync_all()?; // otherwise the we'll need to read the length using seek
-                        file_a.metadata().unwrap().len()
-                    }
+                let file = match opt_file_b {
+                    Some(ref mut file_b) => file_b,
+                    None => &mut file_a
                 };
-                op_len_b(&mut delta, blen)?;
+                op_len_b(&mut delta, file)?;
             }
             OP_HASH_B => {
                 match opt_file_b {
