@@ -11,6 +11,7 @@ build = "build.rs"
 structopt = "0.3"
 #sha2 = "0.9"
 blake3 = "0.3"
+anyhow = "*"
 
 
 [build-dependencies]

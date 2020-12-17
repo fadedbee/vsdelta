@@ -1,10 +1,11 @@
 use structopt::StructOpt;
 use std::fs::{File, OpenOptions};
-use std::io::{SeekFrom, Result};
+use std::io::{SeekFrom};
 use vsdelta::common::*;
 use std::io::prelude::*;
 use std::panic;
 use std::process;
+use anyhow::{Context, Result};
 
 #[derive(StructOpt)]
 struct Cli {
@@ -108,6 +109,8 @@ fn op_len_b(delta: &mut File, file: &mut File)-> Result<()>  {
     delta.read_exact(&mut lenbuf)?;
     let len = u8aletou64(lenbuf);
     println!("OP_LEN_B {:?}", len);
+    // TODO: this condition should only be be true if file is file_a
+    // Can we check this without wrapping ourselves in knots?
     if len < blen { // if the file should shrink, we must truncate it
         file.set_len(len).unwrap();
         file.sync_all()?; // otherwise the we'll need to read the length using seek
@@ -135,6 +138,7 @@ fn op_hash_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
 fn main() -> Result<()> {
     let args = Cli::from_args();
 
+    /*
     #[cfg(not(debug_assertions))]
     panic::set_hook(Box::new(|panic_info| {
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -144,11 +148,13 @@ fn main() -> Result<()> {
         }
         process::exit(1);
     }));
+    */
 
     // this only needs to be writeble if it is being updated in-place
     let mut file_a = OpenOptions::new().write(args.file_b.is_none())
                                        .read(true)
-                                       .open(args.file_a).unwrap();
+                                       .open(&args.file_a)
+                                       .with_context(|| format!("Error opening {}", args.file_a))?;
     let alen = file_a.metadata().unwrap().len();
 
     let mut delta = File::open(args.delta_input)?;
