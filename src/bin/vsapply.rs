@@ -81,7 +81,7 @@ fn sparse_copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
         src.read_exact(&mut copybuf).unwrap();
         if is_zero(&copybuf) {
             //println!("pos: {:?} (zeros)", pos);
-            dst.seek(SeekFrom::Current(OP_SKIP_CHUNKLEN as i64));
+            dst.seek(SeekFrom::Current(OP_SKIP_CHUNKLEN as i64))?;
         } else {
             //println!("pos: {:?}", pos);
             //println!("copybuf {:X?}", copybuf);
@@ -92,11 +92,16 @@ fn sparse_copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
     let mut copybuf = vec![0u8; remainder as usize];
     src.read_exact(&mut copybuf).unwrap();
     if is_zero(&copybuf) {
-        dst.seek(SeekFrom::Current(remainder as i64));
+        dst.seek(SeekFrom::Current(remainder as i64))?;
     } else {
         //println!("copybuf {:X?}", copybuf);
         dst.write(&copybuf).unwrap();
     }
+
+    // TODO: these three lines only need to be executed if the last thing to happen was a dst.seek() after an is_zero.
+    let dst_pos = dst.seek(SeekFrom::Current(0)).unwrap();
+    println!("dst_pos: {:?} (zeros)", dst_pos);
+    dst.set_len(dst_pos).unwrap();
 
     Ok(())
 }
@@ -238,13 +243,14 @@ fn main() -> Result<()> {
             OP_SKIP => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_SKIP {:?}", count);
                 match opt_file_b {
                     Some(ref mut file_b) => {
-                        println!("OP_SKIP copy_data {:?}", count);
+                        println!("OP_SKIP sparse_copy_data {:?}", count);
                         sparse_copy_data(file_b, &mut file_a, count)?; // copy data from file_a
+                        //copy_data(file_b, &mut file_a, count)?; // copy data from file_a
                     },
                     None => {
+                        println!("OP_SKIP {:?}", count);
                         file_a.seek(SeekFrom::Current(count as i64))?; // skip, nothing to do
                     }
                 }
@@ -252,13 +258,14 @@ fn main() -> Result<()> {
             OP_DIFF => {
                 delta.read_exact(&mut count_buf)?;
                 let count = u8aletou64(count_buf);
-                println!("OP_DIFF {:?}", count);
                 match opt_file_b {
                     Some(ref mut file_b) => {
+                        println!("OP_DIFF copy_data {:?}", count);
                         file_a.seek(SeekFrom::Current(count as i64))?; // skip data in file_a
                         copy_data(file_b, &mut delta, count)?; // copy data from delta
                     },
                     None => {
+                        println!("OP_DIFF {:?}", count);
                         copy_data(&mut file_a, &mut delta, count)?; // copy data from delta
                     }
                 }
