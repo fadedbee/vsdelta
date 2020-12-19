@@ -31,7 +31,7 @@ fn u8aletou64(b: [u8; 8]) -> u64 {
  * Copies "num" bytes from src to dst.
  */
 fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
-    const OP_SKIP_CHUNKSIZE: usize = 59;
+    const OP_SKIP_CHUNKSIZE: usize = 1024 * 1024;
     const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
 
     let num_chunks = num / OP_SKIP_CHUNKLEN;
@@ -50,6 +50,53 @@ fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
     src.read_exact(&mut copybuf).unwrap();
     println!("copybuf {:X?}", copybuf);
     dst.write(&copybuf).unwrap();
+
+    Ok(())
+}
+
+fn is_zero(buf: &Vec<u8>) -> bool {
+    for byte in buf.into_iter() {
+        if *byte != 0 {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* 
+ * Copies "num" bytes from src to dst.
+ * 
+ * Skips blocks of zeros by seeking forwards, creating a sparse file.
+ */
+fn sparse_copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
+    const OP_SKIP_CHUNKSIZE: usize = 4096;
+    const OP_SKIP_CHUNKLEN: u64 = OP_SKIP_CHUNKSIZE as u64;
+
+    let num_chunks = num / OP_SKIP_CHUNKLEN;
+    let remainder = num - num_chunks * OP_SKIP_CHUNKLEN;
+
+    let mut copybuf = vec![0xFFu8; OP_SKIP_CHUNKSIZE];
+    for _ in 0..(num / OP_SKIP_CHUNKLEN) {
+        let pos = src.seek(SeekFrom::Current(0)).unwrap();
+        src.read_exact(&mut copybuf).unwrap();
+        if is_zero(&copybuf) {
+            //println!("pos: {:?} (zeros)", pos);
+            dst.seek(SeekFrom::Current(OP_SKIP_CHUNKLEN as i64));
+        } else {
+            //println!("pos: {:?}", pos);
+            //println!("copybuf {:X?}", copybuf);
+            dst.write(&copybuf).unwrap();
+        }
+    }
+
+    let mut copybuf = vec![0u8; remainder as usize];
+    src.read_exact(&mut copybuf).unwrap();
+    if is_zero(&copybuf) {
+        dst.seek(SeekFrom::Current(remainder as i64));
+    } else {
+        //println!("copybuf {:X?}", copybuf);
+        dst.write(&copybuf).unwrap();
+    }
 
     Ok(())
 }
@@ -195,7 +242,7 @@ fn main() -> Result<()> {
                 match opt_file_b {
                     Some(ref mut file_b) => {
                         println!("OP_SKIP copy_data {:?}", count);
-                        copy_data(file_b, &mut file_a, count)?; // copy data from file_a
+                        sparse_copy_data(file_b, &mut file_a, count)?; // copy data from file_a
                     },
                     None => {
                         file_a.seek(SeekFrom::Current(count as i64))?; // skip, nothing to do
