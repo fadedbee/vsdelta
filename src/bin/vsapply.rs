@@ -38,16 +38,16 @@ fn copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
 
     let mut copybuf = vec![0xFFu8; OP_SKIP_CHUNKSIZE];
     for _ in 0..(num / OP_SKIP_CHUNKLEN) {
-        let pos = src.seek(SeekFrom::Current(0)).unwrap();
-        println!("pos: {:?}", pos);
+        //let pos = src.seek(SeekFrom::Current(0)).unwrap();
+        //println!("pos: {:?}", pos);
         src.read_exact(&mut copybuf).unwrap();
-        println!("copybuf {:X?}", copybuf);
+        //println!("copybuf {:X?}", copybuf);
         dst.write(&copybuf).unwrap();
     }
 
     let mut copybuf = vec![0u8; remainder as usize];
     src.read_exact(&mut copybuf).unwrap();
-    println!("copybuf {:X?}", copybuf);
+    //println!("copybuf {:X?}", copybuf);
     dst.write(&copybuf).unwrap();
 
     Ok(())
@@ -99,7 +99,7 @@ fn sparse_copy_data(dst: &mut File, src: &mut File, num: u64) -> Result<()> {
 
     // TODO: these three lines only need to be executed if the last thing to happen was a dst.seek() after an is_zero.
     let dst_pos = dst.seek(SeekFrom::Current(0)).context("Error seeking to current position in desintation.")?;
-    println!("dst_pos: {:?} (zeros)", dst_pos);
+    //println!("dst_pos: {:?} (zeros)", dst_pos);
     dst.set_len(dst_pos).context("Error setting length of destination.")?;
 
     Ok(())
@@ -129,7 +129,7 @@ fn op_ver(delta: &mut File) -> Result<()> {
         panic!("Incompatible version.");
     }
     // TODO: don't panic, find a way of returning an error.
-    println!("OP_VER {:?}.{:?}.{:?}", ver[0], ver[1], ver[2]);
+    //println!("OP_VER {:?}.{:?}.{:?}", ver[0], ver[1], ver[2]);
     Ok(())
 }
 
@@ -137,7 +137,7 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
     let mut lenbuf = [0u8; 8];
     delta.read_exact(&mut lenbuf).context("Error reading expected length of file_a.")?;
     let len = u8aletou64(lenbuf);
-    println!("OP_LEN_A {:?}", len);
+    //println!("OP_LEN_A {:?}", len);
     if len != alen {
         // TODO: don't panic, find a way of returning an error.
         panic!("This delta expects file_a to be {:?} bytes long, not {:?} bytes.", len, alen);
@@ -148,7 +148,7 @@ fn op_len_a(delta: &mut File, alen: u64)-> Result<()>  {
 fn op_hash_a(delta: &mut File, file_a: &mut File, alen: u64) -> Result<()> {
     let mut hashbuf = [0u8; 32];
     delta.read_exact(&mut hashbuf).context("Error reading expected hash of file_a.")?;
-    println!("OP_HASH_A {:02X?}", hashbuf);
+    //println!("OP_HASH_A {:02X?}", hashbuf);
     let hash = hash_file(file_a, alen)?;
     if hash != hashbuf {
         // TODO: don't panic, find a way of returning an error.
@@ -164,7 +164,7 @@ fn op_len_b(delta: &mut File, file: &mut File)-> Result<()>  {
     let mut lenbuf = [0u8; 8];
     delta.read_exact(&mut lenbuf).context("Error reading expected final length of file.")?;
     let len = u8aletou64(lenbuf);
-    println!("OP_LEN_B {:?}", len);
+    //println!("OP_LEN_B {:?}", len);
     // TODO: this condition should only be be true if file is file_a
     // Can we check this without wrapping ourselves in knots?
     if len < blen { // if the file should shrink, we must truncate it
@@ -182,13 +182,11 @@ fn op_len_b(delta: &mut File, file: &mut File)-> Result<()>  {
 fn op_hash_b(delta: &mut File, file_b: &mut File, blen: u64) -> Result<()> {
     let mut hashbuf = [0u8; 32];
     delta.read_exact(&mut hashbuf).context("Error reading expected final hash of file.")?;
-    println!("OP_HASH_B {:02X?}", hashbuf);
-    /*
+    //println!("OP_HASH_B {:02X?}", hashbuf);
     let hash = hash_file(file_b, blen)?;
     if hash != hashbuf {
         panic!("This delta expects file_b's hash to be {:X?}, not {:X?}.", hashbuf, hash);
     };
-    */
     Ok(())
 }
 
@@ -240,11 +238,11 @@ fn main() -> Result<()> {
                 let count = u8aletou64(count_buf);
                 match opt_file_b {
                     Some(ref mut file_b) => {
-                        println!("OP_SKIP sparse_copy_data {:?}", count);
+                        //println!("OP_SKIP sparse_copy_data {:?}", count);
                         sparse_copy_data(file_b, &mut file_a, count).context("Error performing (potentially) sparse copy.")? // copy data from file_a
                     },
                     None => {
-                        println!("OP_SKIP {:?}", count);
+                        //println!("OP_SKIP {:?}", count);
                         file_a.seek(SeekFrom::Current(count as i64)).context("Error skipping bytes in file_a.")?; // skip, nothing to do
                     }
                 }
@@ -254,12 +252,12 @@ fn main() -> Result<()> {
                 let count = u8aletou64(count_buf);
                 match opt_file_b {
                     Some(ref mut file_b) => {
-                        println!("OP_DIFF copy_data {:?}", count);
+                        //println!("OP_DIFF copy_data {:?}", count);
                         file_a.seek(SeekFrom::Current(count as i64)).context("Error seeking past different bytes in file_a.")?; // skip data in file_a
                         copy_data(file_b, &mut delta, count).context("Error copying bytes from delta into file_b.")?; // copy data from delta
                     },
                     None => {
-                        println!("OP_DIFF {:?}", count);
+                        //println!("OP_DIFF {:?}", count);
                         copy_data(&mut file_a, &mut delta, count).context("Error copying data from delta into file_a")?; // copy data from delta
                     }
                 }
@@ -276,19 +274,19 @@ fn main() -> Result<()> {
                     Some(ref mut file_b) => {
                         file_b.sync_all().context("Error syncing file_b")?; // otherwise the we'll need to read the length using seek
                         let blen = file_b.metadata().context("Error reading file_b metadata.")?.len();
-                        println!("blen: {:?}", blen);
+                        //println!("blen: {:?}", blen);
                         op_hash_b(&mut delta, file_b, blen).context("Error verifying file_b hash.")?;
                     },
                     None => {
                         file_a.sync_all()?; // otherwise the we'll need to read the length using seek
                         let alen = file_a.metadata().context("Error reading file_a meatadata.")?.len();
-                        println!("blen: {:?}", alen);
+                        //println!("blen: {:?}", alen);
                         op_hash_b(&mut delta, &mut file_a, alen).context("Error verifying hash of modified file_a.")?;
                     }
                 }
             }
             OP_END => {
-                println!("OP_END");
+                //println!("OP_END");
                 break;
             }
             _ => {

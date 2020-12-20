@@ -30,16 +30,16 @@ pub fn hash_file(file: &mut File, file_len: u64) -> Result<[u8; 32]> {
 	let mut buf = [0u8; BIGCHUNKSIZE];
 	let num_chunks = file_len / BIGCHUNKLEN;
 	for _ in 0..num_chunks {
-		let pos = file.seek(SeekFrom::Current(0)).unwrap();
-		println!("pos: {:?}", pos);
+		//let pos = file.seek(SeekFrom::Current(0)).unwrap();
+		//println!("pos: {:?}", pos);
 		file.read_exact(&mut buf).unwrap();		
 		hasher.update(&buf);
 	}
 
-	let pos = file.seek(SeekFrom::Current(0)).unwrap();
-	println!("pos: {:?}", pos);
+	//let pos = file.seek(SeekFrom::Current(0)).unwrap();
+	//println!("pos: {:?}", pos);
 	let remainder = file_len as usize - num_chunks as usize * BIGCHUNKSIZE;
-	println!("remainder: {:?}", remainder);
+	//println!("remainder: {:?}", remainder);
 	let mut buf = vec![0u8; remainder];
 	file.read_exact(&mut buf).unwrap();		
 	hasher.update(&buf);
